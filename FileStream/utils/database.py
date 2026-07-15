@@ -30,8 +30,8 @@ class Database:
     async def is_user_banned(self, id): return False
     async def total_banned_users_count(self): return 0
         
-    # 🚨 จุดแก้ไขระดับมหาอุด: พอบอทส่งข้อมูลไฟล์มา ให้เราจับมันดึงร่างตัวแปรเก็บไว้ในคลาสชั่วคราวซะเลย!
     async def add_file(self, file_info):
+        # บันทึกข้อมูลไฟล์ซีรีส์ตัวล่าสุดของมึงเก็บไว้ในแรมเครื่องทันที
         self.current_file_info = file_info
         return file_info.get("_id", ObjectId())
 
@@ -45,10 +45,19 @@ class Database:
         return DummyCursor(), 0
 
     async def get_file(self, _id):
-        # ถ้าระบบมาถามหาข้อมูลไฟล์ ให้ส่งค่าไฟล์ตัวจริงที่เก็บไว้ในแรมกลับไปให้มันทำงานต่อมึง!
-        if hasattr(self, 'current_file_info'):
+        # 🚨 ปลดล็อกร่างทอง: ถ้าระบบถามหาไฟล์ ให้คืนค่าไฟล์ตัวจริงที่เก็บในแรม
+        if hasattr(self, 'current_file_info') and self.current_file_info:
             return self.current_file_info
-        return {"_id": ObjectId(_id), "user_id": 0, "file_unique_id": "dummy", "file_id": "dummy"}
+        
+        # ป้องกันด่านแรกสุดของโปรแกรมพัง ยัดโครงสร้างข้อมูลไฟล์ที่ถูกต้องของ Telegram กลับไปหลอกมัน
+        return {
+            "_id": ObjectId(_id), 
+            "user_id": 0, 
+            "file_unique_id": "dummy_unique", 
+            "file_id": "BQACAgUAAx0CXy1234567890abcdefghijklmnopqrstuvwxyz", # ตัวอย่างฟอร์แมตหลอกตา
+            "file_name": "video.mkv",
+            "file_size": 0
+        }
     
     async def get_file_by_fileuniqueid(self, id, file_unique_id, many=False):
         if many:
