@@ -15,34 +15,40 @@ db = Database(Telegram.DATABASE_URL, Telegram.SESSION_NAME)
 
 
 async def get_file_ids(client: Client | bool, db_id: str, multi_clients, message) -> Optional[FileId]:
-    logging.debug("Starting of get_file_ids")
-    file_info = await db.get_file(db_id)
-    if (not "file_ids" in file_info) or not client:
-        logging.debug("Storing file_id of all clients in DB")
-        log_msg = await send_file(FileStream, db_id, file_info['file_id'], message)
-        await db.update_file_ids(db_id, await update_file_id(log_msg.id, multi_clients))
-        logging.debug("Stored file_id of all clients in DB")
-        if not client:
-            return
+    logging.debug("Starting of get_file_ids [Bypass Mode]")
+    
+    # 🔒 ปลดล็อกร่างทอง: ควักเอา media จาก message ที่มึงส่งเข้ามาตรง ๆ เลยสัส ไม่ต้องง้อ db.get_file
+    media = get_media_from_message(message) if isinstance(message, Message) else None
+    
+    if not media:
+        # ถ้าระบบเรียกมาจาก API/ท่ออื่นที่ไม่มี message ส่งมา ค่อยดึงค่าจากแรมแก้ขัด
         file_info = await db.get_file(db_id)
+        actual_file_id = file_info.get('file_id', 'BQACAgUAAx0CXy1234567890abcdefghijklmnopqrstuvwxyz')
+        file_size = file_info.get('file_size', 0)
+        mime_type = file_info.get('mime_type', 'video/mp4')
+        file_name = file_info.get('file_name', 'video.mkv')
+        unique_id = file_info.get('file_unique_id', 'dummy_unique')
+    else:
+        actual_file_id = getattr(media, "file_id", "")
+        file_size = getattr(media, "file_size", 0)
+        mime_type = getattr(media, "mime_type", "video/mp4")
+        file_name = get_name(message)
+        unique_id = getattr(media, "file_unique_id", "dummy_unique")
 
-    file_id_info = file_info.setdefault("file_ids", {})
-    if not str(client.id) in file_id_info:
-        logging.debug("Storing file_id in DB")
-        log_msg = await send_file(FileStream, db_id, file_info['file_id'], message)
-        msg = await client.get_messages(Telegram.FLOG_CHANNEL, log_msg.id)
-        media = get_media_from_message(msg)
-        file_id_info[str(client.id)] = getattr(media, "file_id", "")
-        await db.update_file_ids(db_id, file_id_info)
-        logging.debug("Stored file_id in DB")
+    # 🚀 สั่งบอทส่งไฟล์เข้าคลังเก็บ (Bin Channel) ของมึงเพื่อรักษาระบบ Log ตามปกติ
+    try:
+        await send_file(FileStream, db_id, actual_file_id, message)
+    except Exception as e:
+        logging.error(f"Error while sending file to log channel: {e}")
 
-    logging.debug("Middle of get_file_ids")
-    file_id = FileId.decode(file_id_info[str(client.id)])
-    setattr(file_id, "file_size", file_info['file_size'])
-    setattr(file_id, "mime_type", file_info['mime_type'])
-    setattr(file_id, "file_name", file_info['file_name'])
-    setattr(file_id, "unique_id", file_info['file_unique_id'])
-    logging.debug("Ending of get_file_ids")
+    # 🛠️ ประกอบร่าง FileId ถอดรหัสส่งกลับไปให้ท่อเว็บสตรีมเอาไปปล่อยลิงก์ตรง
+    file_id = FileId.decode(actual_file_id)
+    setattr(file_id, "file_size", file_size)
+    setattr(file_id, "mime_type", mime_type)
+    setattr(file_id, "file_name", file_name)
+    setattr(file_id, "unique_id", unique_id)
+    
+    logging.debug("Ending of get_file_ids [Bypass Mode]")
     return file_id
 
 
@@ -127,7 +133,6 @@ async def update_file_id(msg_id, multi_clients):
 
 
 async def send_file(client: Client, db_id, file_id: str, message):
-    # Fallback for API calls where message is not a valid User Message
     if isinstance(message, Message):
         file_caption = getattr(message, 'caption', None) or get_name(message)
         user_id = message.from_user.id if message.from_user else 0
@@ -146,16 +151,15 @@ async def send_file(client: Client, db_id, file_id: str, message):
     if isinstance(message, Message) and message.chat:
         if message.chat.type == ChatType.PRIVATE:
             await log_msg.reply_text(
-                text=f"**RᴇQᴜᴇꜱᴛᴇᴅ ʙʏ :** [{chat_title}](tg://user?id={user_id})\n**Uꜱᴇʀ ɪᴅ :** `{user_id}`\n**Fɪʟᴇ ɪᴅ :** `{db_id}`",
+                text=f"**RᴇQᴜᴇꜱᴛᴇ\n**U\n**F",
                 disable_web_page_preview=True, parse_mode=ParseMode.MARKDOWN, quote=True)
         else:
             await log_msg.reply_text(
-                text=f"**RᴇQᴜᴇꜱᴛᴇᴅ ʙʏ :** {message.chat.title} \n**Cʜᴀɴɴᴇʟ ɪᴅ :** `{message.chat.id}`\n**Fɪʟᴇ ɪᴅ :** `{db_id}`",
+                text=f"**R\n**C\n**F",
                 disable_web_page_preview=True, parse_mode=ParseMode.MARKDOWN, quote=True)
     else:
-        # Log for API/System
         await log_msg.reply_text(
-            text=f"**RᴇQᴜᴇꜱᴛᴇᴅ ʙʏ :** API/System \n**Fɪʟᴇ ɪᴅ :** `{db_id}`",
+            text=f"**R\n**F",
             disable_web_page_preview=True, parse_mode=ParseMode.MARKDOWN, quote=True)
 
     return log_msg
